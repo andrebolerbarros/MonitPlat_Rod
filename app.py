@@ -1,8 +1,8 @@
-"""Mouse strain management dashboard (Streamlit).
+"""iStrain: strain management dashboards for rodents and aquatic models (Streamlit).
 
 Run locally:   streamlit run app_scratch.py
-Data:          breeding_pairs.csv + litters.csv, looked up in ./data, ../../data
-               or $STRAIN_DATA_DIR. Other files can be uploaded from the sidebar.
+Data:          breeding_pairs.csv + litters.csv, looked up in ./data (rodents) and ./data/aquatic
+               (aquatic), ../../data, or $STRAIN_DATA_DIR. Other files can be uploaded from the sidebar.
 """
 from __future__ import annotations
 
@@ -19,7 +19,14 @@ from scipy import stats
 
 WEAN_AGE_DAYS = 21
 MIN_STRAIN_MONTHS = 6   # strains with a shorter record are kept out of the regression plots
-DEFAULT_BENCHMARKS = {"BALB/cJ": 6.0, "C57BL/6J": 7.0, "FVB/NJ": 8.0, "C3H": 6.0}
+DEFAULT_BENCHMARKS = {"BALB/cJ": 6.0, "C57BL/6J": 7.0, "FVB/NJ": 8.0, "C3H": 6.0,
+                      "L404": 6.0, "L438": 7.0, "L134": 8.0, "L127": 6.0}
+PLATFORMS = {
+    "rodent": dict(label="Rodents", icon="🐭", title="Mouse strain management", data_sub="",
+                   unit="pair", units="pairs", id_col="pair_id", schedule=True),
+    "aquatic": dict(label="Aquatic", icon="🐟", title="Aquatic strain management", data_sub="aquatic",
+                    unit="tank", units="tanks", id_col="tank_id", schedule=False),
+}
 # Okabe-Ito, colour-blind safe; one fixed colour per strain across every chart
 PALETTE = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#D55E00", "#56B4E9", "#F0E442"]
 RECENT = "Last six months"
@@ -34,16 +41,16 @@ LITTER_COLS = {
     "wean_date", "n_males_weaned", "n_females_weaned",
 }
 
-st.set_page_config(page_title="Mouse strain management", page_icon="🐭", layout="wide")
+st.set_page_config(page_title="iStrain", page_icon="🧬", layout="wide")
 
 
 # --------------------------------------------------------------------------- data
-def _find_data_dir() -> Path | None:
+def _find_data_dir(sub: str = "") -> Path | None:
     here = Path(__file__).resolve().parent
     candidates = [os.environ.get("STRAIN_DATA_DIR"), here / "data", here.parent.parent / "data", Path.cwd() / "data"]
     for c in candidates:
-        if c and (Path(c) / "litters.csv").exists():
-            return Path(c)
+        if c and (Path(c) / sub / "litters.csv").exists():
+            return Path(c) / sub
     return None
 
 
@@ -60,14 +67,14 @@ def _check_columns(df: pd.DataFrame, required: set[str], name: str) -> None:
         st.stop()
 
 
-def load_data() -> tuple[pd.DataFrame, pd.DataFrame, str]:
+def load_data(sub: str, platform: str) -> tuple[pd.DataFrame, pd.DataFrame, str]:
     with st.sidebar.expander("Data source"):
-        up_p = st.file_uploader("breeding_pairs.csv", type="csv", key="up_pairs")
-        up_l = st.file_uploader("litters.csv", type="csv", key="up_litters")
+        up_p = st.file_uploader("breeding_pairs.csv", type="csv", key=f"up_pairs_{platform}")
+        up_l = st.file_uploader("litters.csv", type="csv", key=f"up_litters_{platform}")
     if up_p is not None and up_l is not None:
         pairs, litters, source = _read_csv(up_p), _read_csv(up_l), "uploaded files"
     else:
-        d = _find_data_dir()
+        d = _find_data_dir(sub)
         if d is None:
             st.error("No data found. Upload breeding_pairs.csv and litters.csv in the sidebar.")
             st.stop()
@@ -263,18 +270,49 @@ def wilson_ci(k: float, n: float, z: float = 1.96) -> tuple[float, float, float]
     return p, centre - half, centre + half
 
 
+# --------------------------------------------------------------------------- landing
+def landing() -> None:
+    st.markdown(
+        """
+        <style>
+        div.stButton > button { height: 8rem; border-radius: 1rem; }
+        div.stButton > button p { font-size: 2.2rem; }
+        </style>
+        """, unsafe_allow_html=True)
+    st.write("")
+    st.markdown("<h1 style='text-align:center'>Welcome to the iStrain - the strain manager of your model organism</h1>",
+                unsafe_allow_html=True)
+    st.write("")
+    _, c1, c2, _ = st.columns([1, 2, 2, 1])
+    for col, key in ((c1, "rodent"), (c2, "aquatic")):
+        cfg_ = PLATFORMS[key]
+        if col.button(f"{cfg_['icon']}  {cfg_['label']}", key=f"go_{key}", width="stretch"):
+            st.session_state["platform"] = key
+            st.rerun()
+
+
+platform = st.session_state.get("platform")
+if platform not in PLATFORMS:
+    landing()
+    st.stop()
+cfg = PLATFORMS[platform]
+if st.sidebar.button("← iStrain home", key="home"):
+    st.session_state["platform"] = None
+    st.rerun()
+
 # --------------------------------------------------------------------------- UI
-pairs_raw, litters_raw, source = load_data()
+pairs_raw, litters_raw, source = load_data(cfg["data_sub"], platform)
 strains = sorted(pairs_raw["strain"].unique())
 color_map = {s: PALETTE[i % len(PALETTE)] for i, s in enumerate(strains)}
 
-st.sidebar.title("🐭 Strain management")
-sel_strains = st.sidebar.multiselect("Strains", strains, default=strains)
-as_of = pd.Timestamp(st.sidebar.date_input("As-of date", value=date.today()))
+st.sidebar.title(f"{cfg['icon']} Strain management")
+sel_strains = st.sidebar.multiselect("Strains", strains, default=strains, key=f"{platform}_strains")
+as_of = pd.Timestamp(st.sidebar.date_input("As-of date", value=date.today(), key=f"{platform}_asof"))
 min_d, max_d = litters_raw["dob"].min().date(), max(litters_raw["dob"].max().date(), as_of.date())
-d_from, d_to = st.sidebar.slider("Litter DOB range", min_d, max_d, (min_d, max_d))
+d_from, d_to = st.sidebar.slider("Litter DOB range", min_d, max_d, (min_d, max_d), key=f"{platform}_dob")
 with st.sidebar.expander("Benchmark litter size (pups)"):
-    bench = {s: st.number_input(s, 0.0, 20.0, DEFAULT_BENCHMARKS.get(s, 7.0), 0.5) for s in strains}
+    bench = {s: st.number_input(s, 0.0, 20.0, DEFAULT_BENCHMARKS.get(s, 7.0), 0.5, key=f"{platform}_bench_{s}")
+             for s in strains}
 st.sidebar.caption(f"Standard weaning age: {WEAN_AGE_DAYS} days · Source: {source}")
 
 pairs_raw = add_pair_state(pairs_raw, as_of)
@@ -290,24 +328,28 @@ lit_all = lit_all[lit_all["strain"].isin(sel_strains) & (lit_all["dob"] <= as_of
 lit = lit_all[(lit_all["dob"].dt.date >= d_from) & (lit_all["dob"].dt.date <= d_to)]
 psum = pair_summary(pairs, lit_all, as_of, bench)
 
-st.title("Mouse strain management")
+st.title(cfg["title"])
 if lit.empty:
     st.warning("No litters match the current filters.")
     st.stop()
 
-tab_over, tab_wean, tab_sex, tab_sched, tab_pairs = st.tabs(
-    ["Overview", "Weaning", "Sex ratio", "Weaning schedule", "Breeding pairs"])
+tab_names = ["Overview", "Weaning", "Sex ratio"] + (["Weaning schedule"] if cfg["schedule"] else []) \
+    + [f"Breeding {cfg['units']}"]
+_tabs = st.tabs(tab_names)
+tab_over, tab_wean, tab_sex = _tabs[:3]
+tab_sched = _tabs[3] if cfg["schedule"] else None
+tab_pairs = _tabs[-1]
 
 # ---- Overview
 with tab_over:
     k = st.columns(2)
-    k[0].metric("Active pairs", len(active_pairs))
+    k[0].metric(f"Active {cfg['units']}", len(active_pairs))
     k[1].metric("Litters to wean", int((~lit["weaned_recorded"]).sum()),
                 help="Litters with no weaning data recorded yet (pre-weaning or past the expected date).")
 
     head, sel = st.columns([3, 2], vertical_alignment="bottom")
     head.subheader("Litter size by strain")
-    period = sel.selectbox("Period", list(PERIODS), index=2, label_visibility="collapsed")
+    period = sel.selectbox("Period", list(PERIODS), index=2, label_visibility="collapsed", key=f"{platform}_period")
     offset = PERIODS[period]
     lit_p = lit if offset is None else lit[lit["dob"] >= as_of - offset]
     if lit_p.empty:
@@ -404,40 +446,42 @@ with tab_sex:
     st.caption(msg)
 
 # ---- Weaning schedule
-with tab_sched:
-    pick = st.selectbox("Strain", ["All strains"] + [x for x in strains if x in sel_strains], key="sched_strain")
-    pending = lit[~lit["weaned_recorded"]]
-    if pick != "All strains":
-        pending = pending[pending["strain"] == pick]
-    pending = pending.sort_values("expected_wean")
-    due = pending[pending["status"] == "Weaning due / overdue"]
-    if len(due):
-        st.warning(f"{len(due)} litter(s) past the expected weaning date with no weaning data recorded.")
-    st.subheader("Weaning schedule")
-    if pending.empty:
-        st.info("Every litter in range has weaning data.")
-    else:
-        st.dataframe(
-            pending[["litter_id", "pair_id", "strain", "dob", "litter_size", "expected_wean", "days_to_wean", "status"]],
-            hide_index=True, width="stretch",
-            column_config={
-                "dob": st.column_config.DateColumn("DOB"),
-                "expected_wean": st.column_config.DateColumn("wean on"),
-                "days_to_wean": st.column_config.NumberColumn("days to wean", format="%d"),
-                "litter_size": st.column_config.NumberColumn("pups", format="%d"),
-            },
-        )
-        st.caption(f"Expected weaning = DOB + {WEAN_AGE_DAYS} days.")
+if tab_sched is not None:
+    with tab_sched:
+        pick = st.selectbox("Strain", ["All strains"] + [x for x in strains if x in sel_strains], key=f"{platform}_sched_strain")
+        pending = lit[~lit["weaned_recorded"]]
+        if pick != "All strains":
+            pending = pending[pending["strain"] == pick]
+        pending = pending.sort_values("expected_wean")
+        due = pending[pending["status"] == "Weaning due / overdue"]
+        if len(due):
+            st.warning(f"{len(due)} litter(s) past the expected weaning date with no weaning data recorded.")
+        st.subheader("Weaning schedule")
+        if pending.empty:
+            st.info("Every litter in range has weaning data.")
+        else:
+            st.dataframe(
+                pending[["litter_id", "pair_id", "strain", "dob", "litter_size", "expected_wean", "days_to_wean", "status"]],
+                hide_index=True, width="stretch",
+                column_config={
+                    "dob": st.column_config.DateColumn("DOB"),
+                    "expected_wean": st.column_config.DateColumn("wean on"),
+                    "days_to_wean": st.column_config.NumberColumn("days to wean", format="%d"),
+                    "litter_size": st.column_config.NumberColumn("pups", format="%d"),
+                },
+            )
+            st.caption(f"Expected weaning = DOB + {WEAN_AGE_DAYS} days.")
 
 # ---- Breeding pairs (active only)
 with tab_pairs:
-    pick = st.selectbox("Strain", ["All strains"] + [x for x in strains if x in sel_strains], key="pairs_strain")
+    pick = st.selectbox("Strain", ["All strains"] + [x for x in strains if x in sel_strains], key=f"{platform}_pairs_strain")
     act = psum[psum["state"] == "active"]
     if pick != "All strains":
         act = act[act["strain"] == pick]
-    st.subheader(f"Active breeding pairs ({len(act)})")
+    st.subheader(f"Active breeding {cfg['units']} ({len(act)})")
     st.dataframe(
-        act.drop(columns=["state", "sacrifice_date"]).sort_values(["strain", "setup_date", "pair_id"]),
+        act.drop(columns=["state", "sacrifice_date"]).sort_values(["strain", "setup_date", "pair_id"])
+            .rename(columns={"pair_id": cfg["id_col"]}),
         hide_index=True, width="stretch",
         column_config={
             "setup_date": st.column_config.DateColumn("set up"),
@@ -452,8 +496,9 @@ with tab_pairs:
             "days_overdue": st.column_config.NumberColumn("overdue (d)", format="%d"),
         },
     )
-    st.caption("Next litter is estimated as last DOB + the pair's own mean interval between litters (needs at "
-               "least two litters). Δ bench. compares the pair's mean litter size to its strain benchmark.")
+    st.caption(f"Next litter is estimated as last DOB + the {cfg['unit']}'s own mean interval between litters "
+               f"(needs at least two litters). Δ bench. compares the {cfg['unit']}'s mean litter size to its "
+               "strain benchmark.")
 
     tl = lit[lit["pair_id"].isin(act["pair_id"])].sort_values(["strain", "pair_id", "dob"])
     if not tl.empty:
