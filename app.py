@@ -22,10 +22,41 @@ MIN_STRAIN_MONTHS = 6   # strains with a shorter record are kept out of the regr
 DEFAULT_BENCHMARKS = {"BALB/cJ": 6.0, "C57BL/6J": 7.0, "FVB/NJ": 8.0, "C3H": 6.0,
                       "L404": 6.0, "L438": 7.0, "L134": 8.0, "L127": 6.0}
 PLATFORMS = {
-    "rodent": dict(label="Rodents", icon="🐭", title="Mouse strain management", data_sub="",
-                   unit="pair", units="pairs", id_col="pair_id", schedule=True),
-    "aquatic": dict(label="Aquatic", icon="🐟", title="Aquatic strain management", data_sub="aquatic",
-                    unit="tank", units="tanks", id_col="tank_id", schedule=False),
+    "rodent": dict(
+        label="Rodents", icon="🐭", title="Mouse strain management", data_sub="",
+        unit="pair", units="pairs", id_col="pair_id", schedule=True,
+        t=dict(
+            batch="litter", batches="litters", batch_cap="Litter", young="pups", y_lbl="Pups per litter",
+            per="pups/litter", wean_tab="Weaning", date_lbl="Date of birth", range_lbl="Litter DOB range",
+            bench_lbl="Benchmark litter size (pups)", age_cap=f"Standard weaning age: {WEAN_AGE_DAYS} days",
+            kpi="Litters to wean", kpi_help="Litters with no weaning data recorded yet "
+                                            "(pre-weaning or past the expected date).",
+            surv_title="Probability of litter survival to weaning: logistic-regression estimate",
+            surv_y="P(pup survives to weaning)",
+            surv_msg="Per strain, logistic regression on weaned litters: success = pup weaned, failure = pup born "
+                     "but not weaned (litter size minus weaned). ",
+            sex_on="weaned litters", last_lbl="last litter", next_lbl="Next litter", dob_short="DOB",
+            id_lbl="litter_id", size_lbl="litter_size", status_map={},
+        )),
+    "aquatic": dict(
+        label="Aquatic", icon="🐟", title="Aquatic strain management", data_sub="aquatic",
+        unit="tank", units="tanks", id_col="tank_id", schedule=False,
+        t=dict(
+            batch="clutch", batches="clutches", batch_cap="Clutch", young="embryos", y_lbl="Embryos per clutch",
+            per="embryos/clutch", wean_tab="Juvenile survival", date_lbl="Spawning date",
+            range_lbl="Clutch spawning-date range", bench_lbl="Benchmark clutch size (embryos)",
+            age_cap=f"Grow-out to juvenile stage: {WEAN_AGE_DAYS} dpf",
+            kpi="Clutches in grow-out", kpi_help="Clutches that have not yet reached the juvenile stage "
+                                                 f"({WEAN_AGE_DAYS} dpf) or have no survivor count recorded.",
+            surv_title="Probability of clutch survival to the juvenile stage (21 dpf): logistic-regression estimate",
+            surv_y="P(embryo survives to 21 dpf)",
+            surv_msg="Per strain, logistic regression on clutches that reached 21 dpf: success = embryo survived to "
+                     "21 dpf, failure = embryo spawned but not surviving (clutch size minus survivors). ",
+            sex_on="clutches that reached 21 dpf", last_lbl="last clutch", next_lbl="Next clutch",
+            dob_short="spawn date", id_lbl="clutch_id", size_lbl="clutch_size",
+            status_map={"Weaned": "At 21 dpf", "Pre-weaning": "In grow-out",
+                        "Weaning due / overdue": "Past 21 dpf, not recorded"},
+        )),
 }
 # Okabe-Ito, colour-blind safe; one fixed colour per strain across every chart
 PALETTE = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#D55E00", "#56B4E9", "#F0E442"]
@@ -296,6 +327,7 @@ if platform not in PLATFORMS:
     landing()
     st.stop()
 cfg = PLATFORMS[platform]
+T = cfg["t"]
 if st.sidebar.button("← iStrain home", key="home"):
     st.session_state["platform"] = None
     st.rerun()
@@ -309,11 +341,11 @@ st.sidebar.title(f"{cfg['icon']} Strain management")
 sel_strains = st.sidebar.multiselect("Strains", strains, default=strains, key=f"{platform}_strains")
 as_of = pd.Timestamp(st.sidebar.date_input("As-of date", value=date.today(), key=f"{platform}_asof"))
 min_d, max_d = litters_raw["dob"].min().date(), max(litters_raw["dob"].max().date(), as_of.date())
-d_from, d_to = st.sidebar.slider("Litter DOB range", min_d, max_d, (min_d, max_d), key=f"{platform}_dob")
-with st.sidebar.expander("Benchmark litter size (pups)"):
+d_from, d_to = st.sidebar.slider(T["range_lbl"], min_d, max_d, (min_d, max_d), key=f"{platform}_dob")
+with st.sidebar.expander(T["bench_lbl"]):
     bench = {s: st.number_input(s, 0.0, 20.0, DEFAULT_BENCHMARKS.get(s, 7.0), 0.5, key=f"{platform}_bench_{s}")
              for s in strains}
-st.sidebar.caption(f"Standard weaning age: {WEAN_AGE_DAYS} days · Source: {source}")
+st.sidebar.caption(f"{T['age_cap']} · Source: {source}")
 
 pairs_raw = add_pair_state(pairs_raw, as_of)
 pairs = pairs_raw[pairs_raw["strain"].isin(sel_strains)]
@@ -330,10 +362,10 @@ psum = pair_summary(pairs, lit_all, as_of, bench)
 
 st.title(cfg["title"])
 if lit.empty:
-    st.warning("No litters match the current filters.")
+    st.warning(f"No {T['batches']} match the current filters.")
     st.stop()
 
-tab_names = ["Overview", "Weaning", "Sex ratio"] + (["Weaning schedule"] if cfg["schedule"] else []) \
+tab_names = ["Overview", T["wean_tab"], "Sex ratio"] + (["Weaning schedule"] if cfg["schedule"] else []) \
     + [f"Breeding {cfg['units']}"]
 _tabs = st.tabs(tab_names)
 tab_over, tab_wean, tab_sex = _tabs[:3]
@@ -344,28 +376,27 @@ tab_pairs = _tabs[-1]
 with tab_over:
     k = st.columns(2)
     k[0].metric(f"Active {cfg['units']}", len(active_pairs))
-    k[1].metric("Litters to wean", int((~lit["weaned_recorded"]).sum()),
-                help="Litters with no weaning data recorded yet (pre-weaning or past the expected date).")
+    k[1].metric(T["kpi"], int((~lit["weaned_recorded"]).sum()), help=T["kpi_help"])
 
     head, sel = st.columns([3, 2], vertical_alignment="bottom")
-    head.subheader("Litter size by strain")
+    head.subheader(f"{T['batch_cap']} size by strain")
     period = sel.selectbox("Period", list(PERIODS), index=2, label_visibility="collapsed", key=f"{platform}_period")
     offset = PERIODS[period]
     lit_p = lit if offset is None else lit[lit["dob"] >= as_of - offset]
     if lit_p.empty:
-        st.info("No litters in this period.")
+        st.info(f"No {T['batches']} in this period.")
     else:
         fig = px.box(lit_p, x="strain", y="litter_size", color="strain", points="all",
                      color_discrete_map=color_map, category_orders={"strain": strains},
-                     labels={"litter_size": "Pups per litter", "strain": ""})
+                     labels={"litter_size": T["y_lbl"], "strain": ""})
         shown = [s for s in strains if s in set(lit_p["strain"])]
         fig.add_trace(go.Scatter(x=shown, y=[bench[s] for s in shown], mode="markers", name="Benchmark",
                                  marker=dict(symbol="line-ew", size=40, line=dict(width=3, color="#444"))))
         fig.update_layout(showlegend=False, height=380, margin=dict(t=10))
         st.plotly_chart(fig, width="stretch")
-        st.caption(f"{len(lit_p)} litters · black bars = strain benchmark")
+        st.caption(f"{len(lit_p)} {T['batches']} · black bars = strain benchmark")
 
-    st.subheader("Pups per litter by trimester: linear-regression estimate")
+    st.subheader(f"{T['y_lbl']} by trimester: linear-regression estimate")
     trend_strains = [s for s in strains if s in sel_strains and established[s]]
     excluded = [s for s in strains if s in sel_strains and not established[s]]
     t0 = lit["dob"].min()
@@ -384,22 +415,22 @@ with tab_over:
             x=x, y=est, mode="lines+markers", name=strain, marker=dict(size=10, color=color_map[strain]),
             line=dict(color=color_map[strain], width=2),
             error_y=dict(type="data", array=half, color=color_map[strain], thickness=2, width=5),
-            hovertemplate=strain + "<br>%{y:.2f} pups/litter<extra></extra>"))
-        trends.append(f"**{strain}** {slope:+.2f} pups/litter per trimester (95% CI {slope_ci[0]:+.2f} to {slope_ci[1]:+.2f})")
+            hovertemplate=strain + f"<br>%{{y:.2f}} {T['per']}<extra></extra>"))
+        trends.append(f"**{strain}** {slope:+.2f} {T['per']} per trimester (95% CI {slope_ci[0]:+.2f} to {slope_ci[1]:+.2f})")
     fig.add_hline(y=0, line_color="#666", line_width=1.5)
-    fig.update_layout(height=380, margin=dict(t=10), legend_title_text="", yaxis_title="Pups per litter",
+    fig.update_layout(height=380, margin=dict(t=10), legend_title_text="", yaxis_title=T["y_lbl"],
                       xaxis=dict(tickmode="array", tickvals=[1, 2, 3, 4], ticktext=["Q1", "Q2", "Q3", "Q4"],
                                  range=[0.5, 4.5], title=""))
     st.plotly_chart(fig, width="stretch")
-    msg = ("Per strain, OLS on individual litters (litter size) with a linear time trend plus a quarter-of-year "
-           "effect; points = estimated pups per litter in Q1-Q4 at the mid-point of the record, pooled across "
-           "years, error bars = 95% CI. ")
+    msg = (f"Per strain, OLS on individual {T['batches']} ({T['batch']} size) with a linear time trend plus a "
+           f"quarter-of-year effect; points = estimated {T['y_lbl'].lower()} in Q1-Q4 at the mid-point of the "
+           "record, pooled across years, error bars = 95% CI. ")
     if trends:
         msg += "Time trend: " + " · ".join(trends) + ". "
     if excluded:
         msg += f"Not shown (under {MIN_STRAIN_MONTHS} months of records): {', '.join(excluded)}. "
     if too_short:
-        msg += f"Too few litters to fit: {', '.join(too_short)}."
+        msg += f"Too few {T['batches']} to fit: {', '.join(too_short)}."
     st.caption(msg)
 
 # ---- Weaning
@@ -407,15 +438,14 @@ with tab_wean:
     weaned = lit[lit["weaned_recorded"]]
     fit_s = [x for x in strains if x in sel_strains and established[x]]
     skipped = [x for x in strains if x in sel_strains and not established[x]]
-    st.subheader("Probability of litter survival to weaning: logistic-regression estimate")
+    st.subheader(T["surv_title"])
     w = weaned.assign(n_lost=lambda d: d["litter_size"] - d["n_weaned"])
     fig, notes, unfitted = logistic_trend_figure(w, "n_weaned", "n_lost", fit_s, lit["dob"].min(),
-                                                 "P(pup survives to weaning)")
+                                                 T["surv_y"])
     st.plotly_chart(fig, width="stretch")
-    msg = ("Per strain, logistic regression on weaned litters: success = pup weaned, failure = pup born but not "
-           "weaned (litter size minus weaned). Terms: linear time trend + quarter-of-year effect. Points = "
+    msg = (T["surv_msg"] + "Terms: linear time trend + quarter-of-year effect. Points = "
            "estimated survival in Q1-Q4 at the mid-point of the record, pooled across years; error bars = 95% CI; "
-           "SE inflated for within-litter correlation when the data are overdispersed. ")
+           f"SE inflated for within-{T['batch']} correlation when the data are overdispersed. ")
     if notes:
         msg += "Time trend (odds ratio, 1 = no change): " + " · ".join(notes) + ". "
     if skipped:
@@ -434,7 +464,7 @@ with tab_sex:
     fig, notes, unfitted = logistic_trend_figure(sx, "n_males_weaned", "n_females_weaned", fit_s,
                                                  lit["dob"].min(), "P(male)", ref_line=0.5)
     st.plotly_chart(fig, width="stretch")
-    msg = ("**Male = success, female = failure.** Per strain, logistic regression on weaned litters "
+    msg = (f"**Male = success, female = failure.** Per strain, logistic regression on {T['sex_on']} "
            "(linear time trend + quarter-of-year effect); points = estimated P(male) in Q1-Q4 at the "
            "mid-point of the record, error bars = 95% CI, dotted line = 50%. ")
     if notes:
@@ -485,33 +515,36 @@ with tab_pairs:
         hide_index=True, width="stretch",
         column_config={
             "setup_date": st.column_config.DateColumn("set up"),
-            "pups_born": st.column_config.NumberColumn("pups", format="%d"),
+            "litters": st.column_config.NumberColumn(T["batches"], format="%d"),
+            "pups_born": st.column_config.NumberColumn(T["young"], format="%d"),
             "mean_litter_size": st.column_config.NumberColumn("mean size", format="%.1f"),
             "benchmark": st.column_config.NumberColumn("bench.", format="%.1f"),
             "vs_benchmark": st.column_config.NumberColumn("Δ bench.", format="%+.1f"),
             "mean_interval_d": st.column_config.NumberColumn("interval (d)", format="%.0f"),
-            "last_litter": st.column_config.DateColumn("last litter"),
+            "last_litter": st.column_config.DateColumn(T["last_lbl"]),
             "days_since_last": st.column_config.NumberColumn("days since", format="%d"),
             "expected_next": st.column_config.DateColumn("next expected"),
             "days_overdue": st.column_config.NumberColumn("overdue (d)", format="%d"),
         },
     )
-    st.caption(f"Next litter is estimated as last DOB + the {cfg['unit']}'s own mean interval between litters "
-               f"(needs at least two litters). Δ bench. compares the {cfg['unit']}'s mean litter size to its "
-               "strain benchmark.")
+    st.caption(f"{T['next_lbl']} is estimated as last {T['dob_short']} + the {cfg['unit']}'s own mean interval "
+               f"between {T['batches']} (needs at least two). Δ bench. compares the {cfg['unit']}'s mean "
+               f"{T['batch']} size to its strain benchmark.")
 
     tl = lit[lit["pair_id"].isin(act["pair_id"])].sort_values(["strain", "pair_id", "dob"])
+    tl = tl.assign(status=tl["status"].map(T["status_map"]).fillna(tl["status"]))
     if not tl.empty:
-        st.subheader("Litter timeline")
+        st.subheader(f"{T['batch_cap']} timeline")
         order = list(act.sort_values(["strain", "setup_date", "pair_id"])["pair_id"])
         fig = px.scatter(tl, x="dob", y="pair_id", size="litter_size", color="strain",
                          color_discrete_map=color_map, category_orders={"pair_id": order[::-1]},
                          hover_data=["litter_id", "litter_size", "status"], size_max=14,
-                         labels={"dob": "Date of birth", "pair_id": ""})
+                         labels={"dob": T["date_lbl"], "pair_id": "", "litter_id": T["id_lbl"], "litter_size": T["size_lbl"]})
         nxt = act.dropna(subset=["expected_next"])
         fig.add_trace(go.Scatter(x=nxt["expected_next"], y=nxt["pair_id"], mode="markers", name="Next expected",
                                  marker=dict(symbol="diamond-open", size=11, line=dict(width=2, color="#444"))))
         fig.add_vline(x=as_of, line_dash="dot", line_color="#888")
         fig.update_layout(height=max(360, 22 * len(order) + 140), margin=dict(t=10), legend_title_text="")
         st.plotly_chart(fig, width="stretch")
-        st.caption("Marker size = litter size. Dotted line = as-of date; open diamonds = estimated next litter.")
+        st.caption(f"Marker size = {T['batch']} size. Dotted line = as-of date; open diamonds = estimated "
+                   f"next {T['batch']}.")
