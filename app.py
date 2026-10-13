@@ -300,15 +300,10 @@ tab_over, tab_wean, tab_sex, tab_sched, tab_pairs = st.tabs(
 
 # ---- Overview
 with tab_over:
-    weaned = lit[lit["weaned_recorded"]]
-    k = st.columns(5)
+    k = st.columns(2)
     k[0].metric("Active pairs", len(active_pairs))
-    k[1].metric("Litters", len(lit))
-    k[2].metric("Pups born", int(lit["litter_size"].sum()))
-    k[3].metric("Mean litter size", f"{lit['litter_size'].mean():.1f}")
-    k[4].metric("Weaned to date", int(weaned["n_weaned"].sum()),
-                help=f"Survival to weaning: {weaned['n_weaned'].sum() / weaned['litter_size'].sum():.0%} "
-                     f"(litters with weaning data only)")
+    k[1].metric("Litters to wean", int((~lit["weaned_recorded"]).sum()),
+                help="Litters with no weaning data recorded yet (pre-weaning or past the expected date).")
 
     head, sel = st.columns([3, 2], vertical_alignment="bottom")
     head.subheader("Litter size by strain")
