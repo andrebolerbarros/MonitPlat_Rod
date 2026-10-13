@@ -31,7 +31,7 @@ PLATFORMS = {
             bench_lbl="Benchmark litter size (pups)", age_cap=f"Standard weaning age: {WEAN_AGE_DAYS} days",
             kpi="Litters to wean", kpi_help="Litters with no weaning data recorded yet "
                                             "(pre-weaning or past the expected date).",
-            surv_title="Probability of litter survival to weaning: logistic-regression estimate",
+            surv_title="Probability of litter survival to weaning",
             surv_y="P(pup survives to weaning)",
             surv_msg="Per strain, logistic regression on weaned litters: success = pup weaned, failure = pup born "
                      "but not weaned (litter size minus weaned). ",
@@ -48,7 +48,7 @@ PLATFORMS = {
             age_cap=f"Grow-out to juvenile stage: {WEAN_AGE_DAYS} dpf",
             kpi="Clutches in grow-out", kpi_help="Clutches that have not yet reached the juvenile stage "
                                                  f"({WEAN_AGE_DAYS} dpf) or have no survivor count recorded.",
-            surv_title="Probability of clutch survival to the juvenile stage (21 dpf): logistic-regression estimate",
+            surv_title="Probability of clutch survival to the juvenile stage (21 dpf)",
             surv_y="P(embryo survives to 21 dpf)",
             surv_msg="Per strain, logistic regression on clutches that reached 21 dpf: success = embryo survived to "
                      "21 dpf, failure = embryo spawned but not surviving (clutch size minus survivors). ",
@@ -396,7 +396,7 @@ with tab_over:
         st.plotly_chart(fig, width="stretch")
         st.caption(f"{len(lit_p)} {T['batches']} · black bars = strain benchmark")
 
-    st.subheader(f"{T['y_lbl']} by trimester: linear-regression estimate")
+    st.subheader(f"{T['y_lbl']} by trimester")
     trend_strains = [s for s in strains if s in sel_strains and established[s]]
     excluded = [s for s in strains if s in sel_strains and not established[s]]
     t0 = lit["dob"].min()
@@ -459,13 +459,13 @@ with tab_sex:
     weaned = lit[lit["weaned_recorded"]]
     fit_s = [x for x in strains if x in sel_strains and established[x]]
     skipped = [x for x in strains if x in sel_strains and not established[x]]
-    st.subheader("P(male): logistic-regression estimate")
+    st.subheader("Sex ratio (% of males)")
     sx = weaned[weaned["n_weaned"].astype(float) > 0]
     fig, notes, unfitted = logistic_trend_figure(sx, "n_males_weaned", "n_females_weaned", fit_s,
-                                                 lit["dob"].min(), "P(male)", ref_line=0.5)
+                                                 lit["dob"].min(), "Sex ratio (% of males)", ref_line=0.5)
     st.plotly_chart(fig, width="stretch")
     msg = (f"**Male = success, female = failure.** Per strain, logistic regression on {T['sex_on']} "
-           "(linear time trend + quarter-of-year effect); points = estimated P(male) in Q1-Q4 at the "
+           "(linear time trend + quarter-of-year effect); points = estimated sex ratio (% of males) in Q1-Q4 at the "
            "mid-point of the record, error bars = 95% CI, dotted line = 50%. ")
     if notes:
         msg += "Time trend (odds ratio, 1 = no change): " + " · ".join(notes) + ". "
